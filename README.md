@@ -2,6 +2,16 @@
   <img src="assets/banner.png" alt="Hermes Agent" width="100%">
 </p>
 
+# 功能补丁
+
+## 1） 支持本地部署的 Mem0 REST API 服务
+
+参考我的知乎想法 《[成功集成 HermesAgent + 本地部署的 Mem0 REST API 服务](https://zhuanlan.zhihu.com/p/2034196190330351624)》
+
+## 2） 支持用户ID的映射（解决了不同消息平台的记忆隔离问题）
+
+参考我的知乎想法 《TODO》
+
 # Hermes Agent ☤
 
 <p align="center">

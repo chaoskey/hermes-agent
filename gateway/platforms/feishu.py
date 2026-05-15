@@ -390,6 +390,7 @@ class FeishuAdapterSettings:
     group_rules: Dict[str, FeishuGroupRule] = field(default_factory=dict)
     allow_bots: str = "none"  # "none" | "mentions" | "all"
     require_mention: bool = True
+    user_id_map: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -1444,6 +1445,11 @@ class FeishuAdapter(BasePlatformAdapter):
             )
             allow_bots = "none"
 
+        user_id_map = extra.get("user_id_map", {})
+        if not isinstance(user_id_map, dict):
+            user_id_map = {}
+        user_id_map = {str(k): str(v) for k, v in user_id_map.items()}
+
         return FeishuAdapterSettings(
             app_id=str(extra.get("app_id") or os.getenv("FEISHU_APP_ID", "")).strip(),
             app_secret=str(extra.get("app_secret") or os.getenv("FEISHU_APP_SECRET", "")).strip(),
@@ -1504,6 +1510,7 @@ class FeishuAdapter(BasePlatformAdapter):
             require_mention=_to_boolean(
                 extra.get("require_mention", os.getenv("FEISHU_REQUIRE_MENTION", "true"))
             ),
+            user_id_map=user_id_map,
         )
 
     def _apply_settings(self, settings: FeishuAdapterSettings) -> None:
@@ -3538,6 +3545,11 @@ class FeishuAdapter(BasePlatformAdapter):
         union_id = getattr(sender_id, "union_id", None) or None
         # Prefer tenant-scoped user_id; fall back to app-scoped open_id.
         primary_id = user_id or open_id
+        
+        # Apply configured user_id_map to unify accounts across platforms
+        if primary_id and self._settings.user_id_map:
+            primary_id = self._settings.user_id_map.get(primary_id, primary_id)
+
         # bot/v3/bots/basic_batch only accepts open_id.
         name_lookup_id = open_id if is_bot else (primary_id or union_id)
         display_name = await self._resolve_sender_name_from_api(
