@@ -4,13 +4,19 @@
 
 # 功能补丁
 
+已经更新到 Commit: a480d345e63b114e9de1e9ceed746b7b9e21f0cb （20260515）对应的原始版本。
+
+针对其他版本，我不保证此补丁的有效性。
+
+我只保证不定时，拉取最新版本，并且确保对应版本的有效性。
+
 ## 1） 支持本地部署的 Mem0 REST API 服务
 
-参考我的知乎想法 《[成功集成 HermesAgent + 本地部署的 Mem0 REST API 服务](https://zhuanlan.zhihu.com/p/2034196190330351624)》
+参考我的知乎文章 《[成功集成 HermesAgent + 本地部署的 Mem0 REST API 服务](https://zhuanlan.zhihu.com/p/2034196190330351624)》
 
 ## 2） 支持用户ID的映射（解决了不同消息平台的记忆隔离问题）
 
-参考我的知乎想法 《TODO》
+参考我的知乎文章 《[解决 HermesAgent 不同消息平台的记忆隔离问题](https://zhuanlan.zhihu.com/p/2038949414937612809)》
 
 # Hermes Agent ☤
 
