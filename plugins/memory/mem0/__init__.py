@@ -18,13 +18,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sys
 import threading
 import time
 from typing import Any, Dict, List
 
 from agent.memory_provider import MemoryProvider
-from .local_client import LocalMemoryClient
 from tools.registry import tool_error
 
 logger = logging.getLogger(__name__)
@@ -33,18 +31,6 @@ logger = logging.getLogger(__name__)
 # for _BREAKER_COOLDOWN_SECS to avoid hammering a down server.
 _BREAKER_THRESHOLD = 5
 _BREAKER_COOLDOWN_SECS = 120
-
-
-def _as_bool(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in ("1", "true", "yes", "on"):
-            return True
-        if lowered in ("0", "false", "no", "off"):
-            return False
-    return default
 
 
 # ---------------------------------------------------------------------------
@@ -60,12 +46,8 @@ def _load_config() -> dict:
     """
     from hermes_constants import get_hermes_home
 
-    local_env = _as_bool(os.environ.get("MEM0_LOCAL", "false"), False)
     config = {
         "api_key": os.environ.get("MEM0_API_KEY", ""),
-        "endpoint": os.environ.get("MEM0_ENDPOINT", ""),
-        "service": os.environ.get("MEM0_SERVICE", "local" if local_env else "official"),
-        "local_client": local_env,
         "user_id": os.environ.get("MEM0_USER_ID", "hermes-user"),
         "agent_id": os.environ.get("MEM0_AGENT_ID", "hermes"),
         "rerank": True,
@@ -80,14 +62,6 @@ def _load_config() -> dict:
                            if v is not None and v != ""})
         except Exception:
             pass
-
-    service = str(config.get("service", "")).strip().lower()
-    local_client = _as_bool(config.get("local_client"), False)
-    if service not in ("official", "local"):
-        service = "local" if local_client else "official"
-    config["service"] = service
-    config["local_client"] = service == "local"
-    config["rerank"] = _as_bool(config.get("rerank"), True)
 
     return config
 
@@ -150,8 +124,6 @@ class Mem0MemoryProvider(MemoryProvider):
         self._client = None
         self._client_lock = threading.Lock()
         self._api_key = ""
-        self._endpoint = ""
-        self._service = "official"
         self._user_id = "hermes-user"
         self._agent_id = "hermes"
         self._rerank = True
@@ -169,11 +141,7 @@ class Mem0MemoryProvider(MemoryProvider):
 
     def is_available(self) -> bool:
         cfg = _load_config()
-        api_key = bool(cfg.get("api_key"))
-        service = cfg.get("service", "official")
-        if service == "local":
-            return api_key and bool(cfg.get("endpoint"))
-        return api_key
+        return bool(cfg.get("api_key"))
 
     def save_config(self, values, hermes_home):
         """Write config to $HERMES_HOME/mem0.json."""
@@ -187,7 +155,8 @@ class Mem0MemoryProvider(MemoryProvider):
             except Exception:
                 pass
         existing.update(values)
-        config_path.write_text(json.dumps(existing, indent=2))
+        from utils import atomic_json_write
+        atomic_json_write(config_path, existing, mode=0o600)
 
     def get_config_schema(self):
         return [
@@ -197,113 +166,11 @@ class Mem0MemoryProvider(MemoryProvider):
             {"key": "rerank", "description": "Enable reranking for recall", "default": "true", "choices": ["true", "false"]},
         ]
 
-    def post_setup(self, hermes_home: str, config: dict) -> None:
-        """Configure mem0 service mode (official vs local REST) and credentials."""
-        import getpass
-        from pathlib import Path
-
-        from hermes_cli.config import save_config
-        from hermes_cli.curses_ui import curses_radiolist
-        from hermes_cli.memory_setup import _write_env_vars
-
-        current = _load_config()
-        current_service = current.get("service", "official")
-
-        options = [
-            "Mem0 official service (api.mem0.ai)",
-            "Local Mem0 REST API (self-hosted)",
-        ]
-        default_idx = 0 if current_service == "official" else 1
-        selected = curses_radiolist("Mem0 service mode", options, selected=default_idx, cancel_returns=default_idx)
-        service = "official" if selected == 0 else "local"
-
-        def _prompt(label: str, default: str = "", secret: bool = False) -> str:
-            suffix = f" [{default}]" if default else ""
-            sys.stdout.write(f"  {label}{suffix}: ")
-            sys.stdout.flush()
-            if secret and sys.stdin.isatty():
-                value = getpass.getpass(prompt="")
-            else:
-                value = sys.stdin.readline().strip()
-            return value or default
-
-        print("\n  Configuring mem0:\n")
-
-        existing_key = current.get("api_key", "")
-        masked = f"...{existing_key[-4:]}" if len(existing_key) > 4 else ("set" if existing_key else "")
-        key_label = "Mem0 API key"
-        if masked:
-            key_label += f" (current: {masked})"
-
-        api_key = ""
-        while True:
-            entered_key = _prompt(key_label, secret=True).strip()
-            if entered_key:
-                api_key = entered_key
-                break
-            if existing_key:
-                api_key = existing_key
-                break
-            print("  API key is required.")
-
-        endpoint = ""
-        if service == "local":
-            endpoint_default = str(current.get("endpoint") or "http://localhost:8888")
-            while not endpoint:
-                endpoint = _prompt("Mem0 REST API URL", default=endpoint_default).strip()
-                if not endpoint:
-                    print("  URL is required for local Mem0 REST mode.")
-
-        user_id = _prompt("User identifier", default=str(current.get("user_id", "hermes-user"))).strip() or "hermes-user"
-        agent_id = _prompt("Agent identifier", default=str(current.get("agent_id", "hermes"))).strip() or "hermes"
-
-        rerank_default = "true" if _as_bool(current.get("rerank"), True) else "false"
-        rerank_raw = _prompt("Enable reranking (true/false)", default=rerank_default).strip().lower()
-        rerank = rerank_raw in ("1", "true", "yes", "on")
-
-        provider_cfg = {
-            "service": service,
-            "local_client": service == "local",
-            "endpoint": endpoint,
-            "user_id": user_id,
-            "agent_id": agent_id,
-            "rerank": rerank,
-        }
-        self.save_config(provider_cfg, hermes_home)
-
-        env_updates = {
-            "MEM0_API_KEY": api_key,
-            "MEM0_SERVICE": service,
-            "MEM0_LOCAL": "true" if service == "local" else "false",
-        }
-        if service == "local":
-            env_updates["MEM0_ENDPOINT"] = endpoint
-        _write_env_vars(Path(hermes_home) / ".env", env_updates)
-
-        if not isinstance(config.get("memory"), dict):
-            config["memory"] = {}
-        config["memory"]["provider"] = "mem0"
-        save_config(config)
-
-        print("\n  Memory provider: mem0")
-        print(f"  Service mode: {service}")
-        print("  Activation saved to config.yaml")
-        print("  Provider config saved")
-        print("  API keys saved to .env")
-        print("\n  Start a new session to activate.\n")
-
     def _get_client(self):
         """Thread-safe client accessor with lazy initialization."""
         with self._client_lock:
             if self._client is not None:
                 return self._client
-
-            if self._service == "local":
-                if not self._endpoint:
-                    raise RuntimeError("Mem0 local mode requires endpoint URL. Run: hermes memory setup")
-                self._client = LocalMemoryClient(api_key=self._api_key, endpoint=self._endpoint)
-                return self._client
-
             try:
                 from mem0 import MemoryClient
                 self._client = MemoryClient(api_key=self._api_key)
@@ -337,8 +204,6 @@ class Mem0MemoryProvider(MemoryProvider):
     def initialize(self, session_id: str, **kwargs) -> None:
         self._config = _load_config()
         self._api_key = self._config.get("api_key", "")
-        self._endpoint = self._config.get("endpoint", "")
-        self._service = self._config.get("service", "official")
         # Prefer gateway-provided user_id for per-user memory scoping;
         # fall back to config/env default for CLI (single-user) sessions.
         self._user_id = kwargs.get("user_id") or self._config.get("user_id", "hermes-user")
