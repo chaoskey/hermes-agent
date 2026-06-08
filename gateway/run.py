@@ -6499,6 +6499,27 @@ class GatewayRunner(GatewayKanbanWatchersMixin, GatewaySlashCommandsMixin):
         6. Run agent conversation
         7. Return response
         """
+        # =========================================================
+        # [全局 user_id 映射拦截器]
+        # 从 config.yaml 中读取 gateway.global_user_id_map 字典进行覆盖
+        # =========================================================
+        if event.source and event.source.user_id:
+            try:
+                import yaml
+                from hermes_constants import get_hermes_home
+                cfg_path = get_hermes_home() / "config.yaml"
+                if cfg_path.exists():
+                    with open(cfg_path, "r", encoding="utf-8") as _f:
+                        _cfg = yaml.safe_load(_f) or {}
+                    # 获取配置的 map
+                    _global_map = _cfg.get("gateway", {}).get("global_user_id_map", {})
+                    _raw_id = str(event.source.user_id)
+                    # 如果匹配到，则覆写
+                    if _raw_id in _global_map:
+                        event.source.user_id = str(_global_map[_raw_id])
+            except Exception:
+                pass  # 忽略读取或解析过程中的异常
+
         source = event.source
 
         # Internal events (e.g. background-process completion notifications)

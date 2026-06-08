@@ -1,6 +1,5 @@
 .DS_Store
 /venv/
-/venv.old/
 /_pycache/
 *.pyc*
 __pycache__/
@@ -123,3 +122,5 @@ scripts/out/
 # stores the published notes. They are not a build artifact and must never be
 # committed to the repo root. See the hermes-release skill.
 RELEASE_v*.md
+.git_hermes/
+.git_my/
